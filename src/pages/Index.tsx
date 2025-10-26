@@ -4,43 +4,15 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/ProductCard";
 import { ChatInterface } from "@/components/ChatInterface";
-import { Sparkles, Search, TrendingUp, Zap } from "lucide-react";
+import { Sparkles, Search, TrendingUp, Zap, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-
-const mockProducts = [
-  {
-    id: "1",
-    name: "Wireless Noise-Canceling Headphones",
-    description: "Premium audio with active noise cancellation and 30-hour battery life",
-    price: "$299",
-    imageUrl: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&h=500&fit=crop",
-    affiliateLink: "#",
-    category: "Tech",
-  },
-  {
-    id: "2",
-    name: "Smart Fitness Watch",
-    description: "Track your health with advanced sensors and GPS",
-    price: "$399",
-    imageUrl: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&h=500&fit=crop",
-    affiliateLink: "#",
-    category: "Fitness",
-  },
-  {
-    id: "3",
-    name: "Portable Coffee Maker",
-    description: "Brew barista-quality coffee anywhere, anytime",
-    price: "$89",
-    imageUrl: "https://images.unsplash.com/photo-1517668808822-9ebb02f2a0e6?w=500&h=500&fit=crop",
-    affiliateLink: "#",
-    category: "Lifestyle",
-  },
-];
+import { useProductSearch } from "@/hooks/useProductSearch";
 
 const Index = () => {
   const [isListening, setIsListening] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [showResults, setShowResults] = useState(false);
+  const { products, isLoading, searchProducts } = useProductSearch();
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
     {
       role: "assistant",
@@ -52,16 +24,16 @@ const Index = () => {
     setSearchText(transcript);
   };
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!searchText.trim()) {
       toast.error("Please enter or say what you're looking for");
       return;
     }
     setShowResults(true);
-    toast.success("Finding perfect matches for you...");
+    await searchProducts(searchText);
   };
 
-  const handleChatMessage = (message: string) => {
+  const handleChatMessage = async (message: string) => {
     setMessages([
       ...messages,
       { role: "user", content: message },
@@ -72,6 +44,7 @@ const Index = () => {
     ]);
     setSearchText(message);
     setShowResults(true);
+    await searchProducts(message);
   };
 
   return (
@@ -117,9 +90,19 @@ const Index = () => {
                 onClick={handleSearch}
                 size="lg"
                 className="w-full gradient-primary glow-primary transition-smooth hover:scale-105"
+                disabled={isLoading}
               >
-                <Search className="w-5 h-5 mr-2" />
-                Find Products
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Searching...
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-5 h-5 mr-2" />
+                    Find Products
+                  </>
+                )}
               </Button>
             </div>
 
@@ -144,11 +127,23 @@ const Index = () => {
               <h2 className="text-3xl font-bold mb-8 text-center">
                 Perfect Matches for You
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {mockProducts.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
+              {isLoading ? (
+                <div className="flex justify-center items-center py-20">
+                  <Loader2 className="w-12 h-12 animate-spin text-primary" />
+                </div>
+              ) : products.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {products.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-20 glass rounded-3xl">
+                  <p className="text-xl text-muted-foreground">
+                    No products found. Try searching for something else!
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

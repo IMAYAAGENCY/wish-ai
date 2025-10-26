@@ -1,1 +1,10 @@
 project_id = "sgotbrbtbbectimwqvfq"
+
+[functions.fetch-amazon-products]
+verify_jwt = false
+
+[functions.fetch-admitad-products]
+verify_jwt = false
+
+[functions.search-products]
+verify_jwt = false
