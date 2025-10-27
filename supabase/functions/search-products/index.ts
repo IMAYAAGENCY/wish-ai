@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,7 +13,31 @@ serve(async (req) => {
   }
 
   try {
-    const { searchTerm, category, sources } = await req.json();
+    // Input validation schema
+    const searchSchema = z.object({
+      searchTerm: z.string().trim().max(100, 'Search term must be less than 100 characters').optional(),
+      category: z.string().trim().max(50, 'Category must be less than 50 characters').optional(),
+      sources: z.array(z.string().max(50)).optional()
+    });
+
+    const rawBody = await req.json();
+    const validationResult = searchSchema.safeParse(rawBody);
+    
+    if (!validationResult.success) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid input',
+          details: validationResult.error.errors.map(e => e.message).join(', '),
+          products: []
+        }), 
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    const { searchTerm, category, sources } = validationResult.data;
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -58,19 +83,18 @@ serve(async (req) => {
     console.log('No products in database, fetching from affiliate networks...');
     const fetchPromises = [];
 
+    // Use service role key to call protected edge functions
+    const authHeader = `Bearer ${supabaseKey}`;
+    
     // Fetch from Amazon if no specific source or Amazon is included
     if (!sources || sources.includes('amazon')) {
       fetchPromises.push(
-        fetch(`${supabaseUrl}/functions/v1/fetch-amazon-products`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`
-          },
-          body: JSON.stringify({ searchTerm, category })
+        supabase.functions.invoke('fetch-amazon-products', {
+          body: { searchTerm, category },
+          headers: { Authorization: authHeader }
         }).then(response => {
-          // Silently handle API configuration errors without logging
-          if (!response.ok && (response.status === 400 || response.status === 404)) {
+          if (response.error) {
+            console.error('Error calling fetch-amazon-products:', response.error);
             return null;
           }
           return response;
@@ -81,16 +105,12 @@ serve(async (req) => {
     // Fetch from Admitad if no specific source or Admitad is included
     if (!sources || sources.includes('admitad')) {
       fetchPromises.push(
-        fetch(`${supabaseUrl}/functions/v1/fetch-admitad-products`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`
-          },
-          body: JSON.stringify({ searchTerm, category })
+        supabase.functions.invoke('fetch-admitad-products', {
+          body: { searchTerm, category },
+          headers: { Authorization: authHeader }
         }).then(response => {
-          // Silently handle API configuration errors without logging
-          if (!response.ok && (response.status === 400 || response.status === 404)) {
+          if (response.error) {
+            console.error('Error calling fetch-admitad-products:', response.error);
             return null;
           }
           return response;
@@ -102,11 +122,8 @@ serve(async (req) => {
     const allProducts = [];
 
     for (const response of responses) {
-      if (response && response.ok) {
-        const data = await response.json();
-        if (data.products) {
-          allProducts.push(...data.products);
-        }
+      if (response && response.data && response.data.products) {
+        allProducts.push(...response.data.products);
       }
     }
 

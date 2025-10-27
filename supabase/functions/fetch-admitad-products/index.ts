@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,7 +13,29 @@ serve(async (req) => {
   }
 
   try {
-    const { searchTerm, category } = await req.json();
+    // Input validation schema
+    const searchSchema = z.object({
+      searchTerm: z.string().trim().max(100, 'Search term must be less than 100 characters').optional(),
+      category: z.string().trim().max(50, 'Category must be less than 50 characters').optional()
+    });
+
+    const rawBody = await req.json();
+    const validationResult = searchSchema.safeParse(rawBody);
+    
+    if (!validationResult.success) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid input',
+          details: validationResult.error.errors.map(e => e.message).join(', ')
+        }), 
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    const { searchTerm, category } = validationResult.data;
     
     const ADMITAD_CLIENT_ID = Deno.env.get('ADMITAD_CLIENT_ID');
     const ADMITAD_CLIENT_SECRET = Deno.env.get('ADMITAD_CLIENT_SECRET');
