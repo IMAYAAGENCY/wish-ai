@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      affiliate_clicks: {
+        Row: {
+          affiliate_link: string
+          created_at: string
+          id: string
+          network: string
+          product_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          affiliate_link: string
+          created_at?: string
+          id?: string
+          network: string
+          product_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          affiliate_link?: string
+          created_at?: string
+          id?: string
+          network?: string
+          product_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       affiliate_networks: {
         Row: {
           api_endpoint: string | null
@@ -97,6 +124,50 @@ export type Database = {
           view_count?: number | null
         }
         Relationships: []
+      }
+      commissions: {
+        Row: {
+          affiliate_click_id: string | null
+          amount: number
+          created_at: string
+          currency: string
+          id: string
+          network: string
+          paid_at: string | null
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          affiliate_click_id?: string | null
+          amount: number
+          created_at?: string
+          currency?: string
+          id?: string
+          network: string
+          paid_at?: string | null
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          affiliate_click_id?: string | null
+          amount?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          network?: string
+          paid_at?: string | null
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commissions_affiliate_click_id_fkey"
+            columns: ["affiliate_click_id"]
+            isOneToOne: false
+            referencedRelation: "affiliate_clicks"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       products: {
         Row: {
