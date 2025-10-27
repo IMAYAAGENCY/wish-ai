@@ -17,29 +17,29 @@ export type Database = {
       affiliate_networks: {
         Row: {
           api_endpoint: string | null
-          config: Json | null
           created_at: string | null
           id: string
           is_active: boolean | null
           name: string
+          settings: Json | null
           updated_at: string | null
         }
         Insert: {
           api_endpoint?: string | null
-          config?: Json | null
           created_at?: string | null
           id?: string
           is_active?: boolean | null
           name: string
+          settings?: Json | null
           updated_at?: string | null
         }
         Update: {
           api_endpoint?: string | null
-          config?: Json | null
           created_at?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
+          settings?: Json | null
           updated_at?: string | null
         }
         Relationships: []
