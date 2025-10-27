@@ -231,19 +231,19 @@ export type Database = {
           created_at: string | null
           id: string
           product_id: string | null
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string | null
           id?: string
           product_id?: string | null
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string | null
           id?: string
           product_id?: string | null
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: [
           {
@@ -284,7 +284,7 @@ export type Database = {
           intent: string | null
           query: string
           results_count: number | null
-          user_id: string | null
+          user_id: string
         }
         Insert: {
           clicked_product_id?: string | null
@@ -293,7 +293,7 @@ export type Database = {
           intent?: string | null
           query: string
           results_count?: number | null
-          user_id?: string | null
+          user_id: string
         }
         Update: {
           clicked_product_id?: string | null
@@ -302,7 +302,7 @@ export type Database = {
           intent?: string | null
           query?: string
           results_count?: number | null
-          user_id?: string | null
+          user_id?: string
         }
         Relationships: [
           {
