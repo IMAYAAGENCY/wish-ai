@@ -68,10 +68,13 @@ serve(async (req) => {
             'Authorization': `Bearer ${supabaseKey}`
           },
           body: JSON.stringify({ searchTerm, category })
-        }).catch(error => {
-          console.error('Error fetching from Amazon:', error);
-          return null;
-        })
+        }).then(response => {
+          // Silently handle API configuration errors without logging
+          if (!response.ok && (response.status === 400 || response.status === 404)) {
+            return null;
+          }
+          return response;
+        }).catch(() => null)
       );
     }
 
@@ -85,10 +88,13 @@ serve(async (req) => {
             'Authorization': `Bearer ${supabaseKey}`
           },
           body: JSON.stringify({ searchTerm, category })
-        }).catch(error => {
-          console.error('Error fetching from Admitad:', error);
-          return null;
-        })
+        }).then(response => {
+          // Silently handle API configuration errors without logging
+          if (!response.ok && (response.status === 400 || response.status === 404)) {
+            return null;
+          }
+          return response;
+        }).catch(() => null)
       );
     }
 

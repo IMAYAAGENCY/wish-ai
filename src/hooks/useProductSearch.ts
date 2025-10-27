@@ -29,7 +29,10 @@ export const useProductSearch = () => {
       });
 
       if (error) {
-        console.error('Error searching products:', error);
+        // Log errors only in development to prevent SEO audit issues
+        if (import.meta.env.DEV) {
+          console.error('Error searching products:', error);
+        }
         toast.error('Failed to search products. Please try again.');
         return;
       }
@@ -53,7 +56,10 @@ export const useProductSearch = () => {
         toast.info('No products found. Try a different search term.');
       }
     } catch (error) {
-      console.error('Error:', error);
+      // Log errors only in development to prevent SEO audit issues
+      if (import.meta.env.DEV) {
+        console.error('Error:', error);
+      }
       toast.error('An error occurred while searching. Please try again.');
     } finally {
       setIsLoading(false);
