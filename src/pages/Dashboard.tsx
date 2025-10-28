@@ -1,10 +1,13 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
-import { Users, MousePointerClick, DollarSign, TrendingUp } from "lucide-react";
+import { Users, MousePointerClick, DollarSign, TrendingUp, Linkedin } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const Dashboard = () => {
   const { stats, isLoading, error } = useDashboardStats();
+  const navigate = useNavigate();
 
   if (error) {
     return (
@@ -22,9 +25,19 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-6 space-y-6">
-        <div>
-          <h1 className="text-4xl font-bold text-foreground mb-2">Dashboard</h1>
-          <p className="text-muted-foreground">Overview of your WISH AI platform metrics</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-foreground mb-2">Dashboard</h1>
+            <p className="text-muted-foreground">Overview of your WISH AI platform metrics</p>
+          </div>
+          <Button
+            onClick={() => navigate('/linkedin-test')}
+            variant="outline"
+            className="gap-2"
+          >
+            <Linkedin className="w-4 h-4" />
+            Test LinkedIn Post
+          </Button>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

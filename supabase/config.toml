@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.generate-blog-posts]
 verify_jwt = false
+
+[functions.post-to-linkedin]
+verify_jwt = false
