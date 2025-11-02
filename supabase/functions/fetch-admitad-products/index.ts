@@ -54,7 +54,9 @@ serve(async (req) => {
       );
     }
 
-    // First, get OAuth token
+    console.log('Starting Admitad OAuth authentication...');
+
+    // First, get OAuth token using correct Admitad endpoint
     const tokenResponse = await fetch('https://api.admitad.com/token/', {
       method: 'POST',
       headers: {
@@ -64,8 +66,8 @@ serve(async (req) => {
       body: new URLSearchParams({
         grant_type: 'client_credentials',
         client_id: ADMITAD_CLIENT_ID,
-        scope: 'public_data'
-      })
+        scope: 'advcampaigns_for_website'
+      }).toString()
     });
 
     if (!tokenResponse.ok) {
@@ -74,7 +76,8 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Failed to authenticate with Admitad',
-          details: errorText
+          details: errorText,
+          status: tokenResponse.status
         }), 
         { 
           status: tokenResponse.status,
@@ -85,18 +88,21 @@ serve(async (req) => {
 
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
+    console.log('Admitad authentication successful');
 
-    console.log('Searching Admitad for:', searchTerm);
+    console.log('Searching Admitad for:', searchTerm || 'electronics');
 
-    // Search for products using Admitad API
-    const searchUrl = new URL('https://api.admitad.com/products/');
+    // Search for products using correct Admitad Products API v2
+    const searchUrl = new URL('https://api.admitad.com/advcampaigns/products/');
     searchUrl.searchParams.append('keyword', searchTerm || 'electronics');
     if (category) {
       searchUrl.searchParams.append('category', category);
     }
     searchUrl.searchParams.append('limit', '20');
+    searchUrl.searchParams.append('offset', '0');
 
     const productsResponse = await fetch(searchUrl.toString(), {
+      method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
@@ -106,61 +112,58 @@ serve(async (req) => {
     if (!productsResponse.ok) {
       const errorText = await productsResponse.text();
       console.error('Admitad products error:', productsResponse.status, errorText);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to fetch Admitad products',
-          details: errorText
-        }), 
-        { 
-          status: productsResponse.status,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      
+      // If products endpoint fails, try aggregator endpoint as fallback
+      console.log('Trying aggregator endpoint as fallback...');
+      const aggregatorUrl = new URL('https://api.admitad.com/products/search/');
+      aggregatorUrl.searchParams.append('q', searchTerm || 'electronics');
+      aggregatorUrl.searchParams.append('limit', '20');
+      
+      const aggregatorResponse = await fetch(aggregatorUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
         }
-      );
+      });
+      
+      if (!aggregatorResponse.ok) {
+        const aggErrorText = await aggregatorResponse.text();
+        console.error('Admitad aggregator error:', aggregatorResponse.status, aggErrorText);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Failed to fetch Admitad products from both endpoints',
+            details: { primary: errorText, fallback: aggErrorText },
+            status: aggregatorResponse.status
+          }), 
+          { 
+            status: aggregatorResponse.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      
+      const aggregatorData = await aggregatorResponse.json();
+      const aggregatorProducts = transformAggregatorProducts(aggregatorData, category);
+      
+      return await storeAndReturnProducts(aggregatorProducts);
     }
 
     const data = await productsResponse.json();
+    console.log('Admitad API response received');
     
-    // Initialize Supabase client to store products
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Transform and store products
-    const products = data.results?.map((item: any) => ({
-      name: item.name || 'Unknown Product',
-      description: item.description || '',
-      price: item.price ? `$${item.price}` : 'N/A',
-      image_url: item.picture || item.img_url || '',
-      affiliate_link: item.goto_link || item.url || '',
-      category: category || item.category_name || 'General',
-      source: 'admitad',
-      external_id: String(item.id)
-    })) || [];
-
-    // Upsert products to database
-    if (products.length > 0) {
-      const { error: upsertError } = await supabase
-        .from('products')
-        .upsert(products, { onConflict: 'source,external_id' });
-
-      if (upsertError) {
-        console.error('Error upserting products:', upsertError);
-      }
-    }
-
-    return new Response(
-      JSON.stringify({ products }), 
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
-    );
+    // Transform products
+    const products = transformProducts(data, category);
+    
+    return await storeAndReturnProducts(products);
 
   } catch (error) {
     console.error('Error in fetch-admitad-products:', error);
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Unknown error',
-        message: 'Failed to fetch Admitad products. Please check your API credentials.'
+        message: 'Failed to fetch Admitad products. Please check your API credentials.',
+        stack: error instanceof Error ? error.stack : undefined
       }), 
       { 
         status: 500,
@@ -169,3 +172,61 @@ serve(async (req) => {
     );
   }
 });
+
+// Helper function to transform products from main API
+function transformProducts(data: any, category?: string) {
+  return data.results?.map((item: any) => ({
+    name: item.name || 'Unknown Product',
+    description: item.description || item.short_description || '',
+    price: item.price ? `$${item.price}` : (item.price_min ? `$${item.price_min}` : 'N/A'),
+    image_url: item.picture || item.picture_url || item.img_url || '',
+    affiliate_link: item.goto_link || item.url || '',
+    category: category || item.category_name || 'General',
+    source: 'admitad',
+    external_id: String(item.id)
+  })) || [];
+}
+
+// Helper function to transform products from aggregator API
+function transformAggregatorProducts(data: any, category?: string) {
+  return data.products?.map((item: any) => ({
+    name: item.name || 'Unknown Product',
+    description: item.description || '',
+    price: item.price ? `$${item.price}` : 'N/A',
+    image_url: item.image || item.img || '',
+    affiliate_link: item.link || '',
+    category: category || 'General',
+    source: 'admitad',
+    external_id: String(item.id)
+  })) || [];
+}
+
+// Helper function to store products and return response
+async function storeAndReturnProducts(products: any[]) {
+  // Initialize Supabase client to store products
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  console.log(`Found ${products.length} products from Admitad`);
+
+  // Upsert products to database
+  if (products.length > 0) {
+    const { error: upsertError } = await supabase
+      .from('products')
+      .upsert(products, { onConflict: 'source,external_id' });
+
+    if (upsertError) {
+      console.error('Error upserting products:', upsertError);
+    } else {
+      console.log('Products successfully stored in database');
+    }
+  }
+
+  return new Response(
+    JSON.stringify({ products }), 
+    { 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    }
+  );
+}

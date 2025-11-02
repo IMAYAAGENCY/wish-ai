@@ -7,6 +7,90 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper function to convert bytes to hex string
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// Helper function to create HMAC-SHA256 signature
+async function hmacSHA256(key: Uint8Array | string, message: string): Promise<Uint8Array> {
+  const encoder = new TextEncoder();
+  const keyData = typeof key === 'string' ? encoder.encode(key) : key;
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData as unknown as ArrayBuffer,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    cryptoKey,
+    encoder.encode(message)
+  );
+  
+  return new Uint8Array(signature);
+}
+
+// Helper function to create SHA256 hash
+async function sha256(message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return bytesToHex(new Uint8Array(hashBuffer));
+}
+
+// AWS Signature Version 4 signing
+async function signAWSRequest(
+  method: string,
+  host: string,
+  uri: string,
+  querystring: string,
+  payload: string,
+  accessKey: string,
+  secretKey: string,
+  region: string,
+  service: string
+) {
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.substring(0, 8);
+  
+  // Create canonical request
+  const payloadHash = await sha256(payload);
+  const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\nx-amz-date:${amzDate}\nx-amz-target:com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems\n`;
+  const signedHeaders = 'content-type;host;x-amz-date;x-amz-target';
+  const canonicalRequest = `${method}\n${uri}\n${querystring}\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  
+  // Create string to sign
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const canonicalRequestHash = await sha256(canonicalRequest);
+  const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${canonicalRequestHash}`;
+  
+  // Calculate signature
+  const kDate = await hmacSHA256(`AWS4${secretKey}`, dateStamp);
+  const kRegion = await hmacSHA256(kDate, region);
+  const kService = await hmacSHA256(kRegion, service);
+  const kSigning = await hmacSHA256(kService, 'aws4_request');
+  const signature = bytesToHex(await hmacSHA256(kSigning, stringToSign));
+  
+  // Create authorization header
+  const authorizationHeader = `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  
+  return {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Host': host,
+    'X-Amz-Date': amzDate,
+    'X-Amz-Target': 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems',
+    'Authorization': authorizationHeader
+  };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -55,13 +139,12 @@ serve(async (req) => {
       );
     }
 
-    // Amazon Product Advertising API 5.0 implementation
-    // Using PAAPI 5.0 which requires AWS Signature Version 4
-    const timestamp = new Date().toISOString();
-    const region = 'us-east-1'; // Change based on your marketplace
+    // Amazon Product Advertising API 5.0 settings
+    const region = 'us-east-1';
     const service = 'ProductAdvertisingAPI';
-    const host = `webservices.amazon.com`;
-    const endpoint = `https://${host}/paapi5/searchitems`;
+    const host = 'webservices.amazon.com';
+    const uri = '/paapi5/searchitems';
+    const endpoint = `https://${host}${uri}`;
 
     // Create the request payload
     const payload = {
@@ -74,22 +157,31 @@ serve(async (req) => {
       ],
       PartnerTag: AMAZON_PARTNER_TAG,
       PartnerType: 'Associates',
-      Marketplace: 'www.amazon.com'
+      Marketplace: 'www.amazon.com',
+      ItemCount: 10
     };
 
+    const payloadString = JSON.stringify(payload);
     console.log('Searching Amazon for:', searchTerm);
 
-    // Note: Full AWS Signature V4 implementation would be required here
-    // This is a placeholder - you'll need to implement proper signing
+    // Sign the request
+    const headers = await signAWSRequest(
+      'POST',
+      host,
+      uri,
+      '',
+      payloadString,
+      AMAZON_ACCESS_KEY,
+      AMAZON_SECRET_KEY,
+      region,
+      service
+    );
+
+    // Make the API request
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Amz-Target': 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems',
-        'X-Amz-Date': timestamp,
-        'Content-Encoding': 'amz-1.0'
-      },
-      body: JSON.stringify(payload)
+      headers: headers,
+      body: payloadString
     });
 
     if (!response.ok) {
@@ -98,7 +190,8 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Failed to fetch Amazon products',
-          details: errorText
+          details: errorText,
+          status: response.status
         }), 
         { 
           status: response.status,
@@ -108,6 +201,7 @@ serve(async (req) => {
     }
 
     const data = await response.json();
+    console.log('Amazon API response received');
     
     // Initialize Supabase client to store products
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -126,6 +220,8 @@ serve(async (req) => {
       external_id: item.ASIN
     })) || [];
 
+    console.log(`Found ${products.length} products from Amazon`);
+
     // Upsert products to database
     if (products.length > 0) {
       const { error: upsertError } = await supabase
@@ -134,6 +230,8 @@ serve(async (req) => {
 
       if (upsertError) {
         console.error('Error upserting products:', upsertError);
+      } else {
+        console.log('Products successfully stored in database');
       }
     }
 
