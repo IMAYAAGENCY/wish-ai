@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { getMockProducts } from '@/data/mockProducts';
 
 interface Product {
   id: string;
@@ -20,26 +20,14 @@ export const useProductSearch = () => {
     setIsLoading(true);
     
     try {
-      const { data, error } = await supabase.functions.invoke('search-products', {
-        body: { 
-          searchTerm, 
-          category,
-          sources: ['amazon', 'admitad']
-        }
-      });
-
-      if (error) {
-        // Log errors only in development to prevent SEO audit issues
-        if (import.meta.env.DEV) {
-          console.error('Error searching products:', error);
-        }
-        toast.error('Failed to search products. Please try again.');
-        return;
-      }
-
-      if (data?.products && data.products.length > 0) {
+      // Simulate API delay for realistic experience
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      const mockData = getMockProducts(searchTerm, category);
+      
+      if (mockData.length > 0) {
         // Transform the data to match the expected format
-        const transformedProducts = data.products.map((p: any) => ({
+        const transformedProducts = mockData.map((p: any) => ({
           id: p.id,
           name: p.name,
           description: p.description || '',
@@ -50,10 +38,10 @@ export const useProductSearch = () => {
         }));
         
         setProducts(transformedProducts);
-        toast.success(`Found ${transformedProducts.length} products!`);
+        toast.success(`Found ${transformedProducts.length} demo products! 🎉`);
       } else {
         setProducts([]);
-        toast.info('No products found. Try a different search term.');
+        toast.info('No products found. Try searching for "headphones", "laptop", or "camera".');
       }
     } catch (error) {
       // Log errors only in development to prevent SEO audit issues
