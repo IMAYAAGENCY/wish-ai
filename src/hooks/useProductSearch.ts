@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { getMockProducts } from '@/data/mockProducts';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Product {
   id: string;
@@ -10,6 +10,8 @@ interface Product {
   imageUrl: string;
   affiliateLink: string;
   category: string;
+  platform?: string;
+  vendor?: string;
 }
 
 export const useProductSearch = () => {
@@ -17,38 +19,56 @@ export const useProductSearch = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const searchProducts = async (searchTerm: string, category?: string) => {
+    if (!searchTerm.trim()) {
+      toast.error("Please enter a search term");
+      return;
+    }
+
     setIsLoading(true);
     
     try {
-      // Simulate API delay for realistic experience
-      await new Promise(resolve => setTimeout(resolve, 800));
+      console.log('Searching products from all platforms:', searchTerm);
       
-      const mockData = getMockProducts(searchTerm, category);
+      const { data, error } = await supabase.functions.invoke('fetch-affiliate-products', {
+        body: { 
+          query: searchTerm,
+          category: category !== "all" ? category : undefined
+        }
+      });
+
+      if (error) {
+        console.error('Edge function error:', error);
+        throw error;
+      }
+
+      const fetchedProducts = data?.products || [];
+      console.log('Products fetched:', fetchedProducts.length);
       
-      if (mockData.length > 0) {
-        // Transform the data to match the expected format
-        const transformedProducts = mockData.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description || '',
-          price: p.price,
-          imageUrl: p.image_url,
-          affiliateLink: p.affiliate_link,
-          category: p.category,
-        }));
-        
-        setProducts(transformedProducts);
-        toast.success(`Found ${transformedProducts.length} demo products! 🎉`);
+      // Transform to match existing Product interface
+      const transformedProducts = fetchedProducts.map((p: any) => ({
+        id: p.id,
+        name: p.title,
+        description: p.description || '',
+        price: `${p.currency === 'USD' ? '$' : p.currency}${p.price.toFixed(2)}`,
+        imageUrl: p.image,
+        affiliateLink: p.affiliateUrl,
+        category: p.category || 'General',
+        platform: p.platform,
+        vendor: p.vendor,
+      }));
+      
+      setProducts(transformedProducts);
+      
+      if (transformedProducts.length === 0) {
+        toast.info("No products found. Configure API credentials in Dashboard to fetch real products.");
       } else {
-        setProducts([]);
-        toast.info('No products found. Try searching for "headphones", "laptop", or "camera".');
+        const platformCount = new Set(transformedProducts.map((p: Product) => p.platform)).size;
+        toast.success(`Found ${transformedProducts.length} products from ${platformCount} platform(s)!`);
       }
     } catch (error) {
-      // Log errors only in development to prevent SEO audit issues
-      if (import.meta.env.DEV) {
-        console.error('Error:', error);
-      }
-      toast.error('An error occurred while searching. Please try again.');
+      console.error("Error searching products:", error);
+      toast.error("Failed to search products. Please try again.");
+      setProducts([]);
     } finally {
       setIsLoading(false);
     }
