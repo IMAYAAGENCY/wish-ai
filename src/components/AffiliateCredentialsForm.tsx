@@ -1,0 +1,260 @@
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { Key, Save, Loader2 } from "lucide-react";
+import type { AffiliatePlatform } from "@/types/affiliate";
+
+interface PlatformConfig {
+  platform: AffiliatePlatform;
+  label: string;
+  fields: { key: string; label: string; type?: string }[];
+}
+
+const platforms: PlatformConfig[] = [
+  {
+    platform: 'amazon',
+    label: 'Amazon Associates',
+    fields: [
+      { key: 'accessKey', label: 'Access Key' },
+      { key: 'secretKey', label: 'Secret Key', type: 'password' },
+      { key: 'partnerTag', label: 'Partner Tag' }
+    ]
+  },
+  {
+    platform: 'admitad',
+    label: 'Admitad',
+    fields: [
+      { key: 'clientId', label: 'Client ID' },
+      { key: 'clientSecret', label: 'Client Secret', type: 'password' }
+    ]
+  },
+  {
+    platform: 'clickbank',
+    label: 'ClickBank',
+    fields: [
+      { key: 'apiKey', label: 'API Key', type: 'password' },
+      { key: 'accountNickname', label: 'Account Nickname' }
+    ]
+  },
+  {
+    platform: 'shareasale',
+    label: 'ShareASale',
+    fields: [
+      { key: 'apiToken', label: 'API Token', type: 'password' },
+      { key: 'apiSecret', label: 'API Secret', type: 'password' },
+      { key: 'affiliateId', label: 'Affiliate ID' }
+    ]
+  },
+  {
+    platform: 'cj',
+    label: 'CJ Affiliate',
+    fields: [
+      { key: 'apiKey', label: 'API Key', type: 'password' },
+      { key: 'websiteId', label: 'Website ID' }
+    ]
+  },
+  {
+    platform: 'impact',
+    label: 'Impact',
+    fields: [
+      { key: 'accountSid', label: 'Account SID' },
+      { key: 'authToken', label: 'Auth Token', type: 'password' }
+    ]
+  },
+  {
+    platform: 'rakuten',
+    label: 'Rakuten Advertising',
+    fields: [
+      { key: 'apiKey', label: 'API Key', type: 'password' },
+      { key: 'siteId', label: 'Site ID' }
+    ]
+  }
+];
+
+export const AffiliateCredentialsForm = () => {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [credentials, setCredentials] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    fetchCredentials();
+  }, []);
+
+  const fetchCredentials = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('affiliate_credentials')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const credMap: Record<string, any> = {};
+      data?.forEach(item => {
+        const creds = item.credentials as Record<string, any> || {};
+        credMap[item.platform] = {
+          ...creds,
+          is_active: item.is_active
+        };
+      });
+      setCredentials(credMap);
+    } catch (error) {
+      console.error('Error fetching credentials:', error);
+    }
+  };
+
+  const handleSave = async (platform: AffiliatePlatform, values: Record<string, string>, isActive: boolean) => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { error } = await supabase
+        .from('affiliate_credentials')
+        .upsert({
+          user_id: user.id,
+          platform,
+          credentials: values as Record<string, any>,
+          is_active: isActive
+        }, {
+          onConflict: 'user_id,platform'
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `${platform} credentials saved successfully.`
+      });
+
+      await fetchCredentials();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Key className="h-5 w-5 text-primary" />
+          <CardTitle>Affiliate Platform Credentials</CardTitle>
+        </div>
+        <CardDescription>
+          Securely store your API credentials for each affiliate platform
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue={platforms[0].platform} className="w-full">
+          <TabsList className="grid grid-cols-3 lg:grid-cols-7 w-full">
+            {platforms.map(p => (
+              <TabsTrigger key={p.platform} value={p.platform}>
+                {p.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+
+          {platforms.map(platformConfig => (
+            <TabsContent key={platformConfig.platform} value={platformConfig.platform}>
+              <PlatformForm
+                config={platformConfig}
+                initialValues={credentials[platformConfig.platform] || {}}
+                onSave={handleSave}
+                loading={loading}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+};
+
+interface PlatformFormProps {
+  config: PlatformConfig;
+  initialValues: Record<string, any>;
+  onSave: (platform: AffiliatePlatform, values: Record<string, string>, isActive: boolean) => Promise<void>;
+  loading: boolean;
+}
+
+const PlatformForm = ({ config, initialValues, onSave, loading }: PlatformFormProps) => {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [isActive, setIsActive] = useState(false);
+
+  useEffect(() => {
+    const fieldValues: Record<string, string> = {};
+    config.fields.forEach(field => {
+      fieldValues[field.key] = initialValues[field.key] || '';
+    });
+    setValues(fieldValues);
+    setIsActive(initialValues.is_active ?? false);
+  }, [initialValues, config.fields]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave(config.platform, values, isActive);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+        <div>
+          <Label className="text-base font-medium">Enable {config.label}</Label>
+          <p className="text-sm text-muted-foreground">
+            Activate this platform for product searches
+          </p>
+        </div>
+        <Switch
+          checked={isActive}
+          onCheckedChange={setIsActive}
+        />
+      </div>
+
+      <div className="space-y-3">
+        {config.fields.map(field => (
+          <div key={field.key} className="space-y-2">
+            <Label htmlFor={`${config.platform}-${field.key}`}>
+              {field.label}
+            </Label>
+            <Input
+              id={`${config.platform}-${field.key}`}
+              type={field.type || 'text'}
+              value={values[field.key] || ''}
+              onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
+              placeholder={`Enter ${field.label.toLowerCase()}`}
+            />
+          </div>
+        ))}
+      </div>
+
+      <Button type="submit" disabled={loading} className="w-full">
+        {loading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Saving...
+          </>
+        ) : (
+          <>
+            <Save className="mr-2 h-4 w-4" />
+            Save {config.label} Credentials
+          </>
+        )}
+      </Button>
+    </form>
+  );
+};

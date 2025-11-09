@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { Users, MousePointerClick, DollarSign, TrendingUp, Linkedin } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AffiliateCredentialsForm } from "@/components/AffiliateCredentialsForm";
 
 const Dashboard = () => {
   const { stats, isLoading, error } = useDashboardStats();
@@ -158,6 +159,9 @@ const Dashboard = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Affiliate Credentials Management */}
+        <AffiliateCredentialsForm />
       </div>
     </div>
   );
