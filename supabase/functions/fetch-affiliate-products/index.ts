@@ -20,15 +20,19 @@ interface AffiliateProduct {
   vendor?: string;
 }
 
+interface UserCredentials {
+  platform: string;
+  credentials: Record<string, any>;
+  is_active: boolean;
+}
+
 // Amazon Adapter
-async function fetchAmazonProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchAmazonProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const accessKey = Deno.env.get('AMAZON_ACCESS_KEY');
-    const secretKey = Deno.env.get('AMAZON_SECRET_KEY');
-    const partnerTag = Deno.env.get('AMAZON_PARTNER_TAG');
+    const { accessKey, secretKey, partnerTag } = credentials;
 
     if (!accessKey || !secretKey || !partnerTag) {
-      console.log('Amazon credentials not configured');
+      console.log('Amazon credentials incomplete');
       return [];
     }
 
@@ -42,13 +46,12 @@ async function fetchAmazonProducts(query: string): Promise<AffiliateProduct[]> {
 }
 
 // Admitad Adapter
-async function fetchAdmitadProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchAdmitadProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const clientId = Deno.env.get('ADMITAD_CLIENT_ID');
-    const clientSecret = Deno.env.get('ADMITAD_CLIENT_SECRET');
+    const { clientId, clientSecret } = credentials;
 
     if (!clientId || !clientSecret) {
-      console.log('Admitad credentials not configured');
+      console.log('Admitad credentials incomplete');
       return [];
     }
 
@@ -108,13 +111,12 @@ async function fetchAdmitadProducts(query: string): Promise<AffiliateProduct[]> 
 }
 
 // ClickBank Adapter
-async function fetchClickBankProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchClickBankProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const apiKey = Deno.env.get('CLICKBANK_API_KEY');
-    const affiliateId = Deno.env.get('CLICKBANK_AFFILIATE_ID');
+    const { apiKey, accountNickname } = credentials;
 
-    if (!apiKey || !affiliateId) {
-      console.log('ClickBank credentials not configured');
+    if (!apiKey || !accountNickname) {
+      console.log('ClickBank credentials incomplete');
       return [];
     }
 
@@ -128,14 +130,12 @@ async function fetchClickBankProducts(query: string): Promise<AffiliateProduct[]
 }
 
 // ShareASale Adapter
-async function fetchShareASaleProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchShareASaleProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const apiToken = Deno.env.get('SHAREASALE_API_TOKEN');
-    const apiSecret = Deno.env.get('SHAREASALE_API_SECRET');
-    const affiliateId = Deno.env.get('SHAREASALE_AFFILIATE_ID');
+    const { apiToken, apiSecret, affiliateId } = credentials;
 
     if (!apiToken || !apiSecret || !affiliateId) {
-      console.log('ShareASale credentials not configured');
+      console.log('ShareASale credentials incomplete');
       return [];
     }
 
@@ -149,12 +149,12 @@ async function fetchShareASaleProducts(query: string): Promise<AffiliateProduct[
 }
 
 // CJ Affiliate Adapter
-async function fetchCJProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchCJProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const apiKey = Deno.env.get('CJ_API_KEY');
+    const { apiKey, websiteId } = credentials;
 
-    if (!apiKey) {
-      console.log('CJ credentials not configured');
+    if (!apiKey || !websiteId) {
+      console.log('CJ credentials incomplete');
       return [];
     }
 
@@ -168,13 +168,12 @@ async function fetchCJProducts(query: string): Promise<AffiliateProduct[]> {
 }
 
 // Impact Adapter
-async function fetchImpactProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchImpactProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const apiKey = Deno.env.get('IMPACT_API_KEY');
-    const accountSid = Deno.env.get('IMPACT_ACCOUNT_SID');
+    const { accountSid, authToken } = credentials;
 
-    if (!apiKey || !accountSid) {
-      console.log('Impact credentials not configured');
+    if (!accountSid || !authToken) {
+      console.log('Impact credentials incomplete');
       return [];
     }
 
@@ -188,12 +187,12 @@ async function fetchImpactProducts(query: string): Promise<AffiliateProduct[]> {
 }
 
 // Rakuten Adapter
-async function fetchRakutenProducts(query: string): Promise<AffiliateProduct[]> {
+async function fetchRakutenProducts(query: string, credentials: Record<string, any>): Promise<AffiliateProduct[]> {
   try {
-    const apiKey = Deno.env.get('RAKUTEN_API_KEY');
+    const { apiKey, siteId } = credentials;
 
-    if (!apiKey) {
-      console.log('Rakuten credentials not configured');
+    if (!apiKey || !siteId) {
+      console.log('Rakuten credentials incomplete');
       return [];
     }
 
@@ -222,21 +221,95 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log('Searching across platforms:', platforms || 'all');
+    // Initialize Supabase client with user's auth token
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Authorization required. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      }
+    );
+
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      console.error('Auth error:', userError);
+      return new Response(
+        JSON.stringify({ error: 'User not authenticated' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Fetching credentials for user: ${user.id}`);
+
+    // Fetch user's credentials from database
+    const { data: userCredentials, error: credsError } = await supabase
+      .from('affiliate_credentials')
+      .select('platform, credentials, is_active')
+      .eq('user_id', user.id)
+      .eq('is_active', true);
+
+    if (credsError) {
+      console.error('Error fetching credentials:', credsError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to fetch credentials' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Found ${userCredentials?.length || 0} active platform credential(s)`);
+
+    // Create a map of platform credentials
+    const credentialsMap = new Map<string, Record<string, any>>();
+    userCredentials?.forEach((cred: UserCredentials) => {
+      credentialsMap.set(cred.platform, cred.credentials);
+    });
+
+    if (credentialsMap.size === 0) {
+      return new Response(
+        JSON.stringify({ 
+          products: [], 
+          message: 'No affiliate platforms configured. Please add your API credentials in the Dashboard.' 
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Searching across platforms:', Array.from(credentialsMap.keys()).join(', '));
     console.log('Query:', query);
 
-    // Fetch from all enabled platforms in parallel
-    const platformFetchers = [
-      fetchAmazonProducts(query),
-      fetchAdmitadProducts(query),
-      fetchClickBankProducts(query),
-      fetchShareASaleProducts(query),
-      fetchCJProducts(query),
-      fetchImpactProducts(query),
-      fetchRakutenProducts(query),
-    ];
+    // Map of platform fetchers
+    const platformFetchers: Record<string, (query: string, credentials: Record<string, any>) => Promise<AffiliateProduct[]>> = {
+      amazon: fetchAmazonProducts,
+      admitad: fetchAdmitadProducts,
+      clickbank: fetchClickBankProducts,
+      shareasale: fetchShareASaleProducts,
+      cj: fetchCJProducts,
+      impact: fetchImpactProducts,
+      rakuten: fetchRakutenProducts,
+    };
 
-    const results = await Promise.allSettled(platformFetchers);
+    // Fetch from all enabled platforms in parallel
+    const platformPromises = Array.from(credentialsMap.entries()).map(([platform, credentials]) => {
+      const fetcher = platformFetchers[platform];
+      if (!fetcher) {
+        console.log(`No fetcher found for platform: ${platform}`);
+        return Promise.resolve([]);
+      }
+      return fetcher(query, credentials);
+    });
+
+    const results = await Promise.allSettled(platformPromises);
     
     // Combine all successful results
     const allProducts = results
@@ -257,8 +330,9 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     console.error('Error in fetch-affiliate-products:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
