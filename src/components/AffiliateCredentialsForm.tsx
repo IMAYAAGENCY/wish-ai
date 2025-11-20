@@ -7,7 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Key, Save, Loader2 } from "lucide-react";
+import { Key, Save, Loader2, CheckCircle2, XCircle, TestTube } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { AffiliatePlatform } from "@/types/affiliate";
 
 interface PlatformConfig {
@@ -185,6 +186,11 @@ export const AffiliateCredentialsForm = () => {
   );
 };
 
+interface TestResult {
+  success: boolean;
+  message: string;
+}
+
 interface PlatformFormProps {
   config: PlatformConfig;
   initialValues: Record<string, any>;
@@ -193,8 +199,11 @@ interface PlatformFormProps {
 }
 
 const PlatformForm = ({ config, initialValues, onSave, loading }: PlatformFormProps) => {
+  const { toast } = useToast();
   const [values, setValues] = useState<Record<string, string>>({});
   const [isActive, setIsActive] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   useEffect(() => {
     const fieldValues: Record<string, string> = {};
@@ -208,6 +217,46 @@ const PlatformForm = ({ config, initialValues, onSave, loading }: PlatformFormPr
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(config.platform, values, isActive);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const { data, error } = await supabase.functions.invoke('test-affiliate-credentials', {
+        body: { platform: config.platform },
+      });
+
+      if (error) throw error;
+
+      setTestResult(data);
+      
+      toast({
+        title: data.success ? "Test Successful" : "Test Failed",
+        description: data.message,
+        variant: data.success ? "default" : "destructive"
+      });
+    } catch (error: any) {
+      const result = {
+        success: false,
+        message: error.message
+      };
+      setTestResult(result);
+      
+      toast({
+        title: "Test Failed",
+        description: error.message,
+        variant: "destructive"
+      });
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -242,19 +291,54 @@ const PlatformForm = ({ config, initialValues, onSave, loading }: PlatformFormPr
         ))}
       </div>
 
-      <Button type="submit" disabled={loading} className="w-full">
-        {loading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Saving...
-          </>
-        ) : (
-          <>
-            <Save className="mr-2 h-4 w-4" />
-            Save {config.label} Credentials
-          </>
-        )}
-      </Button>
+      {testResult && (
+        <Alert variant={testResult.success ? "default" : "destructive"}>
+          <div className="flex items-start gap-2">
+            {testResult.success ? (
+              <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5" />
+            ) : (
+              <XCircle className="h-4 w-4 text-destructive mt-0.5" />
+            )}
+            <AlertDescription>{testResult.message}</AlertDescription>
+          </div>
+        </Alert>
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleTest}
+          disabled={testing || loading}
+          className="flex-1"
+        >
+          {testing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Testing...
+            </>
+          ) : (
+            <>
+              <TestTube className="mr-2 h-4 w-4" />
+              Test Credentials
+            </>
+          )}
+        </Button>
+
+        <Button type="submit" disabled={loading || testing} className="flex-1">
+          {loading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" />
+              Save {config.label} Credentials
+            </>
+          )}
+        </Button>
+      </div>
     </form>
   );
 };
