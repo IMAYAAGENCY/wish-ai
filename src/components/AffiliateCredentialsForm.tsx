@@ -7,8 +7,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Key, Save, Loader2, CheckCircle2, XCircle, TestTube } from "lucide-react";
+import { Key, Save, Loader2, CheckCircle2, XCircle, TestTube, Download, Upload } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { encryptCredentials, decryptCredentials } from "@/lib/credentialsEncryption";
 import type { AffiliatePlatform } from "@/types/affiliate";
 
 interface PlatformConfig {
@@ -82,6 +83,8 @@ export const AffiliateCredentialsForm = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [credentials, setCredentials] = useState<Record<string, any>>({});
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
     fetchCredentials();
@@ -149,16 +152,224 @@ export const AffiliateCredentialsForm = () => {
     }
   };
 
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { data, error } = await supabase
+        .from('affiliate_credentials')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        toast({
+          title: "No credentials",
+          description: "You don't have any credentials to export.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Ask for encryption password
+      const password = window.prompt(
+        'Enter a password to encrypt your credentials backup:\n\n⚠️ Remember this password - you will need it to restore your credentials.'
+      );
+
+      if (!password) {
+        toast({
+          title: "Export cancelled",
+          description: "Password is required to export credentials."
+        });
+        return;
+      }
+
+      if (password.length < 8) {
+        toast({
+          title: "Weak password",
+          description: "Please use a password with at least 8 characters.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Encrypt credentials
+      const encryptedData = await encryptCredentials(data, password);
+      
+      const exportData = {
+        version: '1.0',
+        exportDate: new Date().toISOString(),
+        data: encryptedData
+      };
+
+      // Download as JSON file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `affiliate-credentials-backup-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Export successful",
+        description: "Your credentials have been encrypted and downloaded."
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error.message,
+        variant: "destructive"
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    setIsImporting(true);
+    try {
+      // Create file input
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      
+      input.onchange = async (e: Event) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) {
+          setIsImporting(false);
+          return;
+        }
+
+        try {
+          const text = await file.text();
+          const importData = JSON.parse(text);
+
+          if (!importData.version || !importData.data) {
+            throw new Error('Invalid backup file format');
+          }
+
+          // Ask for decryption password
+          const password = window.prompt('Enter the password to decrypt your credentials backup:');
+          
+          if (!password) {
+            toast({
+              title: "Import cancelled",
+              description: "Password is required to import credentials."
+            });
+            setIsImporting(false);
+            return;
+          }
+
+          // Decrypt credentials
+          const decryptedData = await decryptCredentials(importData.data, password);
+
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) throw new Error('User not authenticated');
+
+          // Import each credential
+          let successCount = 0;
+          let errorCount = 0;
+
+          for (const cred of decryptedData) {
+            const { error } = await supabase
+              .from('affiliate_credentials')
+              .upsert({
+                user_id: user.id,
+                platform: cred.platform,
+                credentials: cred.credentials,
+                is_active: cred.is_active
+              }, {
+                onConflict: 'user_id,platform'
+              });
+
+            if (error) {
+              errorCount++;
+              console.error(`Failed to import ${cred.platform}:`, error);
+            } else {
+              successCount++;
+            }
+          }
+
+          await fetchCredentials();
+
+          toast({
+            title: "Import completed",
+            description: `Successfully imported ${successCount} credential(s). ${errorCount > 0 ? `Failed: ${errorCount}` : ''}`
+          });
+        } catch (error: any) {
+          toast({
+            title: "Import failed",
+            description: error.message,
+            variant: "destructive"
+          });
+        } finally {
+          setIsImporting(false);
+        }
+      };
+
+      input.click();
+    } catch (error: any) {
+      toast({
+        title: "Import failed",
+        description: error.message,
+        variant: "destructive"
+      });
+      setIsImporting(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Key className="h-5 w-5 text-primary" />
-          <CardTitle>Affiliate Platform Credentials</CardTitle>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Key className="h-5 w-5 text-primary" />
+            <div>
+              <CardTitle>Affiliate Platform Credentials</CardTitle>
+              <CardDescription>
+                Securely store your API credentials for each affiliate platform
+              </CardDescription>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={isExporting || isImporting}
+            >
+              {isExporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImport}
+              disabled={isExporting || isImporting}
+            >
+              {isImporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Import
+                </>
+              )}
+            </Button>
+          </div>
         </div>
-        <CardDescription>
-          Securely store your API credentials for each affiliate platform
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue={platforms[0].platform} className="w-full">
