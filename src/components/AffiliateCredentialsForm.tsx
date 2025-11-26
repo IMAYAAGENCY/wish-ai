@@ -11,6 +11,7 @@ import { Key, Save, Loader2, CheckCircle2, XCircle, TestTube, Download, Upload }
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { encryptCredentials, decryptCredentials } from "@/lib/credentialsEncryption";
 import { PasswordStrengthDialog } from "@/components/PasswordStrengthDialog";
+import { ImportConfirmationDialog } from "@/components/ImportConfirmationDialog";
 import type { AffiliatePlatform } from "@/types/affiliate";
 
 interface PlatformConfig {
@@ -88,6 +89,8 @@ export const AffiliateCredentialsForm = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [pendingExportData, setPendingExportData] = useState<any>(null);
+  const [showImportConfirmation, setShowImportConfirmation] = useState(false);
+  const [pendingImportData, setPendingImportData] = useState<any>(null);
 
   useEffect(() => {
     fetchCredentials();
@@ -270,46 +273,16 @@ export const AffiliateCredentialsForm = () => {
           // Decrypt credentials
           const decryptedData = await decryptCredentials(importData.data, password);
 
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) throw new Error('User not authenticated');
-
-          // Import each credential
-          let successCount = 0;
-          let errorCount = 0;
-
-          for (const cred of decryptedData) {
-            const { error } = await supabase
-              .from('affiliate_credentials')
-              .upsert({
-                user_id: user.id,
-                platform: cred.platform,
-                credentials: cred.credentials,
-                is_active: cred.is_active
-              }, {
-                onConflict: 'user_id,platform'
-              });
-
-            if (error) {
-              errorCount++;
-              console.error(`Failed to import ${cred.platform}:`, error);
-            } else {
-              successCount++;
-            }
-          }
-
-          await fetchCredentials();
-
-          toast({
-            title: "Import completed",
-            description: `Successfully imported ${successCount} credential(s). ${errorCount > 0 ? `Failed: ${errorCount}` : ''}`
-          });
+          // Store decrypted data and show confirmation dialog
+          setPendingImportData(decryptedData);
+          setShowImportConfirmation(true);
+          setIsImporting(false);
         } catch (error: any) {
           toast({
             title: "Import failed",
             description: error.message,
             variant: "destructive"
           });
-        } finally {
           setIsImporting(false);
         }
       };
@@ -324,6 +297,60 @@ export const AffiliateCredentialsForm = () => {
       setIsImporting(false);
     }
   };
+
+  const handleImportConfirm = async () => {
+    setIsImporting(true);
+    setShowImportConfirmation(false);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      // Import each credential
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const cred of pendingImportData) {
+        const { error } = await supabase
+          .from('affiliate_credentials')
+          .upsert({
+            user_id: user.id,
+            platform: cred.platform,
+            credentials: cred.credentials,
+            is_active: cred.is_active
+          }, {
+            onConflict: 'user_id,platform'
+          });
+
+        if (error) {
+          errorCount++;
+          console.error(`Failed to import ${cred.platform}:`, error);
+        } else {
+          successCount++;
+        }
+      }
+
+      await fetchCredentials();
+
+      toast({
+        title: "Import completed",
+        description: `Successfully imported ${successCount} credential(s). ${errorCount > 0 ? `Failed: ${errorCount}` : ''}`
+      });
+
+      setPendingImportData(null);
+    } catch (error: any) {
+      toast({
+        title: "Import failed",
+        description: error.message,
+        variant: "destructive"
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const existingPlatforms = Object.keys(credentials);
+  const platformsToImport = pendingImportData?.map((cred: any) => cred.platform) || [];
 
   return (
     <>
@@ -403,6 +430,14 @@ export const AffiliateCredentialsForm = () => {
         onConfirm={handlePasswordConfirm}
         title="Set Encryption Password"
         description="Create a strong password to encrypt your credentials backup. You will need this password to restore your credentials."
+      />
+
+      <ImportConfirmationDialog
+        open={showImportConfirmation}
+        onOpenChange={setShowImportConfirmation}
+        onConfirm={handleImportConfirm}
+        platformsToImport={platformsToImport}
+        existingPlatforms={existingPlatforms}
       />
     </>
   );
