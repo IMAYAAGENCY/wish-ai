@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Key, Save, Loader2, CheckCircle2, XCircle, TestTube, Download, Upload } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { encryptCredentials, decryptCredentials } from "@/lib/credentialsEncryption";
+import { PasswordStrengthDialog } from "@/components/PasswordStrengthDialog";
 import type { AffiliatePlatform } from "@/types/affiliate";
 
 interface PlatformConfig {
@@ -85,6 +86,8 @@ export const AffiliateCredentialsForm = () => {
   const [credentials, setCredentials] = useState<Record<string, any>>({});
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [pendingExportData, setPendingExportData] = useState<any>(null);
 
   useEffect(() => {
     fetchCredentials();
@@ -171,33 +174,29 @@ export const AffiliateCredentialsForm = () => {
           description: "You don't have any credentials to export.",
           variant: "destructive"
         });
+        setIsExporting(false);
         return;
       }
 
-      // Ask for encryption password
-      const password = window.prompt(
-        'Enter a password to encrypt your credentials backup:\n\n⚠️ Remember this password - you will need it to restore your credentials.'
-      );
+      // Store data and show password dialog
+      setPendingExportData(data);
+      setShowPasswordDialog(true);
+      setIsExporting(false);
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error.message,
+        variant: "destructive"
+      });
+      setIsExporting(false);
+    }
+  };
 
-      if (!password) {
-        toast({
-          title: "Export cancelled",
-          description: "Password is required to export credentials."
-        });
-        return;
-      }
-
-      if (password.length < 8) {
-        toast({
-          title: "Weak password",
-          description: "Please use a password with at least 8 characters.",
-          variant: "destructive"
-        });
-        return;
-      }
-
+  const handlePasswordConfirm = async (password: string) => {
+    setIsExporting(true);
+    try {
       // Encrypt credentials
-      const encryptedData = await encryptCredentials(data, password);
+      const encryptedData = await encryptCredentials(pendingExportData, password);
       
       const exportData = {
         version: '1.0',
@@ -220,6 +219,8 @@ export const AffiliateCredentialsForm = () => {
         title: "Export successful",
         description: "Your credentials have been encrypted and downloaded."
       });
+
+      setPendingExportData(null);
     } catch (error: any) {
       toast({
         title: "Export failed",
@@ -325,75 +326,85 @@ export const AffiliateCredentialsForm = () => {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Key className="h-5 w-5 text-primary" />
-            <div>
-              <CardTitle>Affiliate Platform Credentials</CardTitle>
-              <CardDescription>
-                Securely store your API credentials for each affiliate platform
-              </CardDescription>
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Key className="h-5 w-5 text-primary" />
+              <div>
+                <CardTitle>Affiliate Platform Credentials</CardTitle>
+                <CardDescription>
+                  Securely store your API credentials for each affiliate platform
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExport}
+                disabled={isExporting || isImporting}
+              >
+                {isExporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 mr-2" />
+                    Export
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleImport}
+                disabled={isExporting || isImporting}
+              >
+                {isImporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import
+                  </>
+                )}
+              </Button>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExport}
-              disabled={isExporting || isImporting}
-            >
-              {isExporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
-                </>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleImport}
-              disabled={isExporting || isImporting}
-            >
-              {isImporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <Upload className="h-4 w-4 mr-2" />
-                  Import
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <Tabs defaultValue={platforms[0].platform} className="w-full">
-          <TabsList className="grid grid-cols-3 lg:grid-cols-7 w-full">
-            {platforms.map(p => (
-              <TabsTrigger key={p.platform} value={p.platform}>
-                {p.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue={platforms[0].platform} className="w-full">
+            <TabsList className="grid grid-cols-3 lg:grid-cols-7 w-full">
+              {platforms.map(p => (
+                <TabsTrigger key={p.platform} value={p.platform}>
+                  {p.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-          {platforms.map(platformConfig => (
-            <TabsContent key={platformConfig.platform} value={platformConfig.platform}>
-              <PlatformForm
-                config={platformConfig}
-                initialValues={credentials[platformConfig.platform] || {}}
-                onSave={handleSave}
-                loading={loading}
-              />
-            </TabsContent>
-          ))}
-        </Tabs>
-      </CardContent>
-    </Card>
+            {platforms.map(platformConfig => (
+              <TabsContent key={platformConfig.platform} value={platformConfig.platform}>
+                <PlatformForm
+                  config={platformConfig}
+                  initialValues={credentials[platformConfig.platform] || {}}
+                  onSave={handleSave}
+                  loading={loading}
+                />
+              </TabsContent>
+            ))}
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <PasswordStrengthDialog
+        open={showPasswordDialog}
+        onOpenChange={setShowPasswordDialog}
+        onConfirm={handlePasswordConfirm}
+        title="Set Encryption Password"
+        description="Create a strong password to encrypt your credentials backup. You will need this password to restore your credentials."
+      />
+    </>
   );
 };
 
